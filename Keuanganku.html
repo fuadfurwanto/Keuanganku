@@ -3,10 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>FinansialKu - Private Cloud</title>
+  <title>FinansialKu - Brankas Pribadi</title>
   
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   
+  <!-- React & Babel -->
   <script type="importmap">
     {
       "imports": {
@@ -33,52 +35,42 @@
     import React, { useState, useEffect, useMemo } from 'react';
     import { createRoot } from 'react-dom/client';
     
-    // Firebase Cloud Database Imports
+    // Kita hanya butuh Firestore (Database), tidak butuh Auth yang suka error di HP
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
-    import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
     import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
-    // =========================================================================
+    // ==========================================
     // 🔴 PASTE FIREBASE CONFIG ANDA DI SINI 🔴
-    // Ganti isi dari variabel firebaseConfig di bawah dengan milik Anda sendiri
-    // =========================================================================
+    // ==========================================
     const firebaseConfig = {
-
-  apiKey: "AIzaSyCgiIKo8nfljTw8PFf_1CjOX_teTYUY-Fc",
-
-  authDomain: "finansialku-pribadi-1315e.firebaseapp.com",
-
-  projectId: "finansialku-pribadi-1315e",
-
-  storageBucket: "finansialku-pribadi-1315e.firebasestorage.app",
-
-  messagingSenderId: "949944720267",
-
-  appId: "1:949944720267:web:b2243aa50fe4fcfebbed8e"
-
+  const firebaseConfig = {
+  apiKey: "AIzaSyBV86XDz9mtCZkHF5o-PA9lzK4BFfJAIR4",
+  authDomain: "finansialku-pribadi-d843c.firebaseapp.com",
+  projectId: "finansialku-pribadi-d843c",
+  storageBucket: "finansialku-pribadi-d843c.firebasestorage.app",
+  messagingSenderId: "960584015160",
+  appId: "1:960584015160:web:e5b5039d31e2e4075635cd"
 };
-
-    let app, auth, db;
     // Cek apakah config sudah diubah
-    const isConfigValid = firebaseConfig.apiKey !== "PASTE_API_KEY_ANDA_DISINI";
-
+    const isConfigValid = firebaseConfig.apiKey !== "AIzaSyBV86XDz9mtCZkHF5o-PA9lzK4BFfJAIR4";
+    
+    let app, db;
     if (isConfigValid) {
       app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
       db = getFirestore(app);
     }
-    
-    const appId = 'finansialku-private-app';
 
     // Formatters
     const formatIDR = (amount) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
     const formatDate = (dateString) => new Date(dateString).toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' });
 
     function App() {
-      const [user, setUser] = useState(null);
-      const [loadingAuth, setLoadingAuth] = useState(isConfigValid);
-      const [toast, setToast] = useState('');
+      // --- SISTEM KUNCI BRANKAS ---
+      // Mengecek apakah HP ini sudah punya kunci sebelumnya
+      const [appKey, setAppKey] = useState(localStorage.getItem('fin_kunci_rahasia') || '');
+      const [inputKey, setInputKey] = useState('');
 
+      const [toast, setToast] = useState('');
       const [activeTab, setActiveTab] = useState('ringkasan');
       const [transactions, setTransactions] = useState([]);
       const [debts, setDebts] = useState([]);
@@ -100,44 +92,48 @@
         setTimeout(() => setToast(''), 3000);
       };
 
-      // 1. Auth Otomatis (Anonim)
+      // Fungsi Buka Brankas (Login Manual)
+      const handleLogin = (e) => {
+        e.preventDefault();
+        if (!inputKey.trim()) return;
+        const key = inputKey.trim().toLowerCase();
+        localStorage.setItem('fin_kunci_rahasia', key); // Simpan di HP
+        setAppKey(key); // Masuk ke aplikasi
+      };
+
+      // Fungsi Ganti HP / Keluar
+      const handleLogout = () => {
+        if(confirm('Yakin ingin mengunci aplikasi? Anda butuh kunci rahasia Anda untuk membukanya kembali.')) {
+          localStorage.removeItem('fin_kunci_rahasia');
+          setAppKey('');
+          setTransactions([]);
+          setDebts([]);
+        }
+      };
+
+      // MENGAMBIL DATA DARI CLOUD BERDASARKAN KUNCI
       useEffect(() => {
-        if (!auth) return;
-        
-        signInAnonymously(auth).catch((error) => {
-          console.error("Auth Error:", error);
-          showToast("Gagal terhubung: Pastikan Anda sudah menyalakan Anonymous Auth di Firebase");
-        });
+        if (!appKey || !db) return;
 
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-          setUser(currentUser);
-          setLoadingAuth(false);
-        });
-        return () => unsubscribe();
-      }, []);
-
-      // 2. Fetch Data Real-time
-      useEffect(() => {
-        if (!user || !db) return;
-
-        const txRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
+        // Path penyimpanan bergantung pada KUNCI yang dimasukkan
+        const txRef = collection(db, 'data_keuangan', appKey, 'transaksi');
         const unsubTx = onSnapshot(txRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          data.sort((a, b) => new Date(b.date) - new Date(a.date));
+          data.sort((a, b) => new Date(b.date) - new Date(a.date)); 
           setTransactions(data);
-        }, (error) => console.error("Error tx:", error));
+        }, (error) => console.error("Error mengambil transaksi:", error));
 
-        const debtRef = collection(db, 'artifacts', appId, 'users', user.uid, 'debts');
+        const debtRef = collection(db, 'data_keuangan', appKey, 'hutang');
         const unsubDebt = onSnapshot(debtRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           data.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
           setDebts(data);
-        }, (error) => console.error("Error debt:", error));
+        }, (error) => console.error("Error mengambil hutang:", error));
 
         return () => { unsubTx(); unsubDebt(); };
-      }, [user]);
+      }, [appKey]);
 
-      // Kalkulasi
+      // KALKULASI KEUANGAN
       const { totalIncome, totalExpense, balance } = useMemo(() => {
         let income = 0; let expense = 0;
         transactions.forEach(tx => {
@@ -151,43 +147,44 @@
         return debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.amount, 0);
       }, [debts]);
 
-      // Handlers
+      // FUNGSI SIMPAN & HAPUS KE FIREBASE
       const handleAddTx = async (e) => {
         e.preventDefault();
-        if (!txAmount || !txDesc || !user || !db) return;
-        const newDocRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'));
+        if (!txAmount || !txDesc || !appKey || !db) return;
+        // Simpan langsung ke folder KUNCI Anda
+        const newDocRef = doc(collection(db, 'data_keuangan', appKey, 'transaksi'));
         await setDoc(newDocRef, { type: txType, amount: parseFloat(txAmount), description: txDesc, date: txDate });
         setTxAmount(''); setTxDesc('');
         showToast('✔️ Transaksi tersimpan');
       };
 
       const handleDeleteTx = async (id) => {
-        if (!user || !db) return;
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', id));
+        if (!appKey || !db) return;
+        await deleteDoc(doc(db, 'data_keuangan', appKey, 'transaksi', id));
         showToast('🗑️ Transaksi dihapus');
       };
 
       const handleAddDebt = async (e) => {
         e.preventDefault();
-        if (!debtAmount || !debtDesc || !debtDueDate || !user || !db) return;
-        const newDocRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'debts'));
+        if (!debtAmount || !debtDesc || !debtDueDate || !appKey || !db) return;
+        const newDocRef = doc(collection(db, 'data_keuangan', appKey, 'hutang'));
         await setDoc(newDocRef, { amount: parseFloat(debtAmount), description: debtDesc, dueDate: debtDueDate, isPaid: false });
         setDebtAmount(''); setDebtDesc(''); setDebtDueDate('');
         showToast('✔️ Hutang tercatat');
       };
 
       const handleToggleDebt = async (debtObj) => {
-        if (!user || !db) return;
-        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'debts', debtObj.id), { ...debtObj, isPaid: !debtObj.isPaid });
+        if (!appKey || !db) return;
+        await setDoc(doc(db, 'data_keuangan', appKey, 'hutang', debtObj.id), { ...debtObj, isPaid: !debtObj.isPaid });
       };
 
       const handleDeleteDebt = async (id) => {
-        if (!user || !db) return;
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'debts', id));
+        if (!appKey || !db) return;
+        await deleteDoc(doc(db, 'data_keuangan', appKey, 'hutang', id));
         showToast('🗑️ Hutang dihapus');
       };
 
-      // Export CSV (Metode yang diperbaiki menggunakan Blob)
+      // FUNGSI UNDUH CSV KE HP
       const handleDownloadCSV = () => {
         const filteredTx = transactions.filter(tx => {
           const d = new Date(tx.date);
@@ -216,57 +213,81 @@
         
         const link = document.createElement("a");
         link.href = url;
-        link.setAttribute("download", `Laporan_${reportYear}_${parseInt(reportMonth)+1}.csv`);
+        link.setAttribute("download", `Laporan_Keuangan_${reportYear}_${parseInt(reportMonth)+1}.csv`);
         
-        // Memastikan download jalan di HP
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
         
-        showToast('📥 Mengunduh CSV...');
+        showToast('📥 Laporan berhasil diunduh');
       };
 
+      // TAMPILAN JIKA BELUM SETUP CONFIG
       if (!isConfigValid) {
         return (
           <div className="flex h-screen items-center justify-center bg-gray-50 p-6 text-center">
-            <div className="bg-white p-6 rounded-2xl shadow border border-orange-200">
+            <div className="bg-white p-6 rounded-2xl shadow border border-orange-200 max-w-sm">
               <span className="text-4xl block mb-4">🔧</span>
               <h2 className="text-xl font-bold text-orange-600 mb-2">Setup Firebase Belum Selesai</h2>
-              <p className="text-gray-600">Buka file kode ini, dan cari tulisan <strong>PASTE FIREBASE CONFIG ANDA DI SINI</strong>. Masukkan konfigurasi Firebase Anda agar aplikasi bisa berjalan.</p>
+              <p className="text-gray-600">Pastikan Anda sudah menempelkan kode Config Firebase Anda di dalam file ini.</p>
             </div>
           </div>
         );
       }
 
-      if (loadingAuth) {
+      // TAMPILAN HALAMAN LOGIN (KUNCI BRANKAS)
+      if (!appKey) {
         return (
-          <div className="flex flex-col h-screen items-center justify-center bg-gray-50 text-blue-600">
-            <div className="animate-spin text-4xl mb-4">☁️</div>
-            <p className="font-medium animate-pulse">Menyambungkan ke Database Anda...</p>
+          <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
+            <div className="bg-white p-8 rounded-3xl shadow-lg border border-gray-100 max-w-sm w-full text-center">
+              <span className="text-6xl block mb-6">🔐</span>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Buka Brankas</h2>
+              <p className="text-gray-500 text-sm mb-6">Buat kata sandi baru atau masukkan kata sandi Anda yang sudah ada untuk mengakses data Anda.</p>
+              
+              <form onSubmit={handleLogin}>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Contoh: rizky123" 
+                  value={inputKey} 
+                  onChange={e => setInputKey(e.target.value)} 
+                  className="w-full p-4 border rounded-xl text-center font-bold text-lg mb-4 focus:ring-4 focus:ring-blue-100 outline-none transition-all" 
+                />
+                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-colors shadow-lg shadow-blue-200">
+                  Buka / Buat Aplikasi
+                </button>
+              </form>
+            </div>
           </div>
         );
       }
 
+      // TAMPILAN UTAMA APLIKASI
       return (
         <div>
+          {/* Toast Notification */}
           {toast && (
             <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-5 py-2 rounded-full shadow-lg z-50 text-sm font-medium flex items-center space-x-2 toast-enter">
               <span>{toast}</span>
             </div>
           )}
 
+          {/* Header */}
           <header className="bg-blue-700 text-white p-4 shadow-md sticky top-0 z-20 flex justify-between items-center">
             <div className="flex items-center space-x-2">
               <span className="text-2xl">👛</span>
-              <h1 className="text-xl font-bold">FinansialKu</h1>
+              <div>
+                <h1 className="text-lg font-bold leading-tight">FinansialKu</h1>
+                <p className="text-[10px] text-blue-200">User: {appKey}</p>
+              </div>
             </div>
-            <div className="text-xs bg-blue-800 px-3 py-1 rounded-full flex items-center shadow-inner">
-              <span className="w-2 h-2 rounded-full bg-green-400 mr-2 animate-pulse"></span>
-              Private DB
-            </div>
+            <button onClick={handleLogout} className="text-xs bg-blue-800 hover:bg-red-600 transition-colors px-3 py-2 rounded-lg flex items-center shadow-inner font-bold">
+              🔒 Kunci
+            </button>
           </header>
 
+          {/* Navigasi Bawah */}
           <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-3 pb-safe z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
             {[
               { id: 'ringkasan', icon: '📊', label: 'Ringkasan' },
@@ -285,6 +306,7 @@
           </nav>
 
           <main className="p-4">
+            {/* TAB: RINGKASAN */}
             {activeTab === 'ringkasan' && (
               <div className="space-y-4">
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
@@ -311,6 +333,7 @@
               </div>
             )}
 
+            {/* TAB: TRANSAKSI */}
             {activeTab === 'transaksi' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
@@ -353,6 +376,7 @@
               </div>
             )}
 
+            {/* TAB: HUTANG */}
             {activeTab === 'hutang' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
@@ -396,6 +420,7 @@
               </div>
             )}
 
+            {/* TAB: LAPORAN */}
             {activeTab === 'laporan' && (
               <div className="space-y-4">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center">
