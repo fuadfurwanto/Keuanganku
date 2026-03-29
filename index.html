@@ -3,10 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>FinansialKu - Private Cloud</title>
+  <title>FinansialKu - Cloud Pribadi</title>
   
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   
+  <!-- React & Babel -->
   <script type="importmap">
     {
       "imports": {
@@ -33,58 +35,56 @@
     import React, { useState, useEffect, useMemo } from 'react';
     import { createRoot } from 'react-dom/client';
     
-    // Firebase Cloud Database Imports
+    // Firebase SDK
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
     import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
     import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
-    // =========================================================================
-    // 🔴 PASTE FIREBASE CONFIG ANDA DI SINI 🔴
-    // Ganti isi dari variabel firebaseConfig di bawah dengan milik Anda sendiri
-    // =========================================================================
+    // ==========================================
+    // KONFIGURASI FIREBASE PRIBADI ANDA
+    // ==========================================
     const firebaseConfig = {
-  apiKey: "AIzaSyBV86XDz9mtCZkHF5o-PA9lzK4BFfJAIR4",
-  authDomain: "finansialku-pribadi-d843c.firebaseapp.com",
-  projectId: "finansialku-pribadi-d843c",
-  storageBucket: "finansialku-pribadi-d843c.firebasestorage.app",
-  messagingSenderId: "960584015160",
-  appId: "1:960584015160:web:e5b5039d31e2e4075635cd"
-};
+      apiKey: "AIzaSyBV86XDz9mtCZkHF5o-PA9lzK4BFfJAIR4",
+      authDomain: "finansialku-pribadi-d843c.firebaseapp.com",
+      projectId: "finansialku-pribadi-d843c",
+      storageBucket: "finansialku-pribadi-d843c.firebasestorage.app",
+      messagingSenderId: "960584015160",
+      appId: "1:960584015160:web:e5b5039d31e2e4075635cd"
+    };
 
-    let app, auth, db;
-    // Cek apakah config sudah diubah
-    const isConfigValid = firebaseConfig.apiKey !== "PASTE_API_KEY_ANDA_DISINI";
-
-    if (isConfigValid) {
-      app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
-      db = getFirestore(app);
-    }
-    
-    const appId = 'finansialku-private-app';
+    // Inisialisasi Firebase
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = 'finansialku-app';
 
     // Formatters
     const formatIDR = (amount) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
     const formatDate = (dateString) => new Date(dateString).toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' });
 
     function App() {
+      // States Auth
       const [user, setUser] = useState(null);
-      const [loadingAuth, setLoadingAuth] = useState(isConfigValid);
+      const [loadingAuth, setLoadingAuth] = useState(true);
       const [toast, setToast] = useState('');
 
+      // States Data
       const [activeTab, setActiveTab] = useState('ringkasan');
       const [transactions, setTransactions] = useState([]);
       const [debts, setDebts] = useState([]);
 
+      // States Form Transaksi
       const [txType, setTxType] = useState('pengeluaran');
       const [txAmount, setTxAmount] = useState('');
       const [txDesc, setTxDesc] = useState('');
       const [txDate, setTxDate] = useState(new Date().toISOString().split('T')[0]);
 
+      // States Form Hutang
       const [debtAmount, setDebtAmount] = useState('');
       const [debtDesc, setDebtDesc] = useState('');
       const [debtDueDate, setDebtDueDate] = useState('');
 
+      // States Laporan
       const [reportMonth, setReportMonth] = useState(new Date().getMonth());
       const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
@@ -93,44 +93,54 @@
         setTimeout(() => setToast(''), 3000);
       };
 
-      // 1. Auth Otomatis (Anonim)
+      // 1. PROSES LOGIN ANONIM (DIPERBAIKI)
       useEffect(() => {
-        if (!auth) return;
-        
-        signInAnonymously(auth).catch((error) => {
-          console.error("Auth Error:", error);
-          showToast("Gagal terhubung: Pastikan Anda sudah menyalakan Anonymous Auth di Firebase");
-        });
-
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-          setUser(currentUser);
-          setLoadingAuth(false);
+          if (currentUser) {
+            // Jika sudah punya sesi (habis di-refresh), pakai yang lama!
+            setUser(currentUser);
+            setLoadingAuth(false);
+          } else {
+            // Jika benar-benar baru pertama kali buka web
+            signInAnonymously(auth).catch((error) => {
+              console.error("Auth Error:", error);
+              showToast("Error Firebase: Pastikan Anonymous Auth sudah NYALA di console!");
+              setLoadingAuth(false);
+            });
+          }
         });
         return () => unsubscribe();
       }, []);
 
-      // 2. Fetch Data Real-time
+      // 2. MENGAMBIL DATA DARI CLOUD ANDA
       useEffect(() => {
-        if (!user || !db) return;
+        if (!user) return; // Jangan ambil data jika belum login
 
+        // Path penyimpanan di Firestore: artifacts/finansialku-app/users/{id_pengguna}/...
         const txRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
         const unsubTx = onSnapshot(txRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          data.sort((a, b) => new Date(b.date) - new Date(a.date));
+          data.sort((a, b) => new Date(b.date) - new Date(a.date)); // Urutkan tanggal terbaru
           setTransactions(data);
-        }, (error) => console.error("Error tx:", error));
+        }, (error) => {
+          console.error("Error mengambil transaksi:", error);
+          showToast("Gagal mengambil data dari database");
+        });
 
         const debtRef = collection(db, 'artifacts', appId, 'users', user.uid, 'debts');
         const unsubDebt = onSnapshot(debtRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          data.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+          data.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)); // Urutkan jatuh tempo terdekat
           setDebts(data);
-        }, (error) => console.error("Error debt:", error));
+        }, (error) => console.error("Error mengambil hutang:", error));
 
-        return () => { unsubTx(); unsubDebt(); };
+        return () => { 
+          unsubTx(); 
+          unsubDebt(); 
+        };
       }, [user]);
 
-      // Kalkulasi
+      // 3. KALKULASI KEUANGAN
       const { totalIncome, totalExpense, balance } = useMemo(() => {
         let income = 0; let expense = 0;
         transactions.forEach(tx => {
@@ -144,43 +154,43 @@
         return debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.amount, 0);
       }, [debts]);
 
-      // Handlers
+      // 4. FUNGSI SIMPAN & HAPUS KE FIREBASE ANDA
       const handleAddTx = async (e) => {
         e.preventDefault();
-        if (!txAmount || !txDesc || !user || !db) return;
+        if (!txAmount || !txDesc || !user) return;
         const newDocRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'));
         await setDoc(newDocRef, { type: txType, amount: parseFloat(txAmount), description: txDesc, date: txDate });
         setTxAmount(''); setTxDesc('');
-        showToast('✔️ Transaksi tersimpan');
+        showToast('✔️ Transaksi tersimpan di Cloud Anda');
       };
 
       const handleDeleteTx = async (id) => {
-        if (!user || !db) return;
+        if (!user) return;
         await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', id));
         showToast('🗑️ Transaksi dihapus');
       };
 
       const handleAddDebt = async (e) => {
         e.preventDefault();
-        if (!debtAmount || !debtDesc || !debtDueDate || !user || !db) return;
+        if (!debtAmount || !debtDesc || !debtDueDate || !user) return;
         const newDocRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'debts'));
         await setDoc(newDocRef, { amount: parseFloat(debtAmount), description: debtDesc, dueDate: debtDueDate, isPaid: false });
         setDebtAmount(''); setDebtDesc(''); setDebtDueDate('');
-        showToast('✔️ Hutang tercatat');
+        showToast('✔️ Hutang tercatat di Cloud Anda');
       };
 
       const handleToggleDebt = async (debtObj) => {
-        if (!user || !db) return;
+        if (!user) return;
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'debts', debtObj.id), { ...debtObj, isPaid: !debtObj.isPaid });
       };
 
       const handleDeleteDebt = async (id) => {
-        if (!user || !db) return;
+        if (!user) return;
         await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'debts', id));
         showToast('🗑️ Hutang dihapus');
       };
 
-      // Export CSV (Metode yang diperbaiki menggunakan Blob)
+      // 5. FUNGSI UNDUH CSV KE HP
       const handleDownloadCSV = () => {
         const filteredTx = transactions.filter(tx => {
           const d = new Date(tx.date);
@@ -209,46 +219,37 @@
         
         const link = document.createElement("a");
         link.href = url;
-        link.setAttribute("download", `Laporan_${reportYear}_${parseInt(reportMonth)+1}.csv`);
+        link.setAttribute("download", `Laporan_Keuangan_${reportYear}_${parseInt(reportMonth)+1}.csv`);
         
-        // Memastikan download jalan di HP
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
         
-        showToast('📥 Mengunduh CSV...');
+        showToast('📥 Mengunduh CSV ke perangkat Anda...');
       };
 
-      if (!isConfigValid) {
-        return (
-          <div className="flex h-screen items-center justify-center bg-gray-50 p-6 text-center">
-            <div className="bg-white p-6 rounded-2xl shadow border border-orange-200">
-              <span className="text-4xl block mb-4">🔧</span>
-              <h2 className="text-xl font-bold text-orange-600 mb-2">Setup Firebase Belum Selesai</h2>
-              <p className="text-gray-600">Buka file kode ini, dan cari tulisan <strong>PASTE FIREBASE CONFIG ANDA DI SINI</strong>. Masukkan konfigurasi Firebase Anda agar aplikasi bisa berjalan.</p>
-            </div>
-          </div>
-        );
-      }
-
+      // TAMPILAN LOADING AWAL
       if (loadingAuth) {
         return (
           <div className="flex flex-col h-screen items-center justify-center bg-gray-50 text-blue-600">
             <div className="animate-spin text-4xl mb-4">☁️</div>
-            <p className="font-medium animate-pulse">Menyambungkan ke Database Anda...</p>
+            <p className="font-medium animate-pulse">Menyambungkan ke finansialku-pribadi...</p>
           </div>
         );
       }
 
+      // TAMPILAN UTAMA
       return (
         <div>
+          {/* Toast Notification */}
           {toast && (
             <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-5 py-2 rounded-full shadow-lg z-50 text-sm font-medium flex items-center space-x-2 toast-enter">
               <span>{toast}</span>
             </div>
           )}
 
+          {/* Header */}
           <header className="bg-blue-700 text-white p-4 shadow-md sticky top-0 z-20 flex justify-between items-center">
             <div className="flex items-center space-x-2">
               <span className="text-2xl">👛</span>
@@ -256,10 +257,11 @@
             </div>
             <div className="text-xs bg-blue-800 px-3 py-1 rounded-full flex items-center shadow-inner">
               <span className="w-2 h-2 rounded-full bg-green-400 mr-2 animate-pulse"></span>
-              Private DB
+              {user ? 'Tersambung' : 'Offline'}
             </div>
           </header>
 
+          {/* Navigasi Bawah */}
           <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-3 pb-safe z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
             {[
               { id: 'ringkasan', icon: '📊', label: 'Ringkasan' },
@@ -278,6 +280,7 @@
           </nav>
 
           <main className="p-4">
+            {/* TAB: RINGKASAN */}
             {activeTab === 'ringkasan' && (
               <div className="space-y-4">
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
@@ -304,6 +307,7 @@
               </div>
             )}
 
+            {/* TAB: TRANSAKSI */}
             {activeTab === 'transaksi' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
@@ -346,6 +350,7 @@
               </div>
             )}
 
+            {/* TAB: HUTANG */}
             {activeTab === 'hutang' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
@@ -389,6 +394,7 @@
               </div>
             )}
 
+            {/* TAB: LAPORAN */}
             {activeTab === 'laporan' && (
               <div className="space-y-4">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center">
