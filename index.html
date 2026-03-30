@@ -3,12 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>FinansialKu - Cloud Pribadi</title>
+  <title>Buku Keuangan</title>
   
-  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   
-  <!-- React & Babel -->
   <script type="importmap">
     {
       "imports": {
@@ -35,112 +33,98 @@
     import React, { useState, useEffect, useMemo } from 'react';
     import { createRoot } from 'react-dom/client';
     
-    // Firebase SDK
+    // Import Firestore dari Google Firebase
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
-    import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
     import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
-    // ==========================================
-    // KONFIGURASI FIREBASE PRIBADI ANDA
-    // ==========================================
+    // =========================================================
+    // 🔴 PASTE FIREBASE CONFIG ANDA DI SINI 🔴
+    // Ganti seluruh isi const firebaseConfig ini dengan milik Anda
+    // =========================================================
     const firebaseConfig = {
-      apiKey: "AIzaSyBV86XDz9mtCZkHF5o-PA9lzK4BFfJAIR4",
-      authDomain: "finansialku-pribadi-d843c.firebaseapp.com",
-      projectId: "finansialku-pribadi-d843c",
-      storageBucket: "finansialku-pribadi-d843c.firebasestorage.app",
-      messagingSenderId: "960584015160",
-      appId: "1:960584015160:web:e5b5039d31e2e4075635cd"
-    };
+  apiKey: "AIzaSyCXRkPDNVsitBWtBufowhG4ET7t58uvzuA",
+  authDomain: "keuanganpribadiku-708ec.firebaseapp.com",
+  projectId: "keuanganpribadiku-708ec",
+  storageBucket: "keuanganpribadiku-708ec.firebasestorage.app",
+  messagingSenderId: "407503439085",
+  appId: "1:407503439085:web:d98a90683fb3a425a978e4"
+};
+    // Pengecekan agar user tidak lupa mengganti config
+    const isConfigValid = firebaseConfig.apiKey !== "PASTE_API_KEY_ANDA_DISINI";
+    
+    let app, db;
+    if (isConfigValid) {
+      app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+    }
 
-    // Inisialisasi Firebase
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const appId = 'finansialku-app';
-
-    // Formatters
     const formatIDR = (amount) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
     const formatDate = (dateString) => new Date(dateString).toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' });
 
     function App() {
-      // States Auth
-      const [user, setUser] = useState(null);
-      const [loadingAuth, setLoadingAuth] = useState(true);
+      // Menyimpan PIN di HP agar tidak perlu ketik terus menerus
+      const [appKey, setAppKey] = useState(localStorage.getItem('kunci_brankas') || '');
+      const [inputKey, setInputKey] = useState('');
+      
       const [toast, setToast] = useState('');
+      const [isError, setIsError] = useState(false);
 
-      // States Data
       const [activeTab, setActiveTab] = useState('ringkasan');
       const [transactions, setTransactions] = useState([]);
       const [debts, setDebts] = useState([]);
 
-      // States Form Transaksi
       const [txType, setTxType] = useState('pengeluaran');
       const [txAmount, setTxAmount] = useState('');
       const [txDesc, setTxDesc] = useState('');
       const [txDate, setTxDate] = useState(new Date().toISOString().split('T')[0]);
 
-      // States Form Hutang
       const [debtAmount, setDebtAmount] = useState('');
       const [debtDesc, setDebtDesc] = useState('');
       const [debtDueDate, setDebtDueDate] = useState('');
 
-      // States Laporan
       const [reportMonth, setReportMonth] = useState(new Date().getMonth());
       const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
-      const showToast = (msg) => {
+      const showToast = (msg, error = false) => {
         setToast(msg);
-        setTimeout(() => setToast(''), 3000);
+        setIsError(error);
+        setTimeout(() => setToast(''), 4000);
       };
 
-      // 1. PROSES LOGIN ANONIM (DIPERBAIKI)
-      useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-          if (currentUser) {
-            // Jika sudah punya sesi (habis di-refresh), pakai yang lama!
-            setUser(currentUser);
-            setLoadingAuth(false);
-          } else {
-            // Jika benar-benar baru pertama kali buka web
-            signInAnonymously(auth).catch((error) => {
-              console.error("Auth Error:", error);
-              showToast("Error Firebase: Pastikan Anonymous Auth sudah NYALA di console!");
-              setLoadingAuth(false);
-            });
-          }
-        });
-        return () => unsubscribe();
-      }, []);
+      const handleLogin = (e) => {
+        e.preventDefault();
+        if (!inputKey.trim()) return;
+        const key = inputKey.trim().toLowerCase();
+        localStorage.setItem('kunci_brankas', key); 
+        setAppKey(key); 
+      };
 
-      // 2. MENGAMBIL DATA DARI CLOUD ANDA
+      // FUNGSI MEMBACA DATA DARI DATABASE (CLOUD)
       useEffect(() => {
-        if (!user) return; // Jangan ambil data jika belum login
+        if (!appKey || !db) return;
 
-        // Path penyimpanan di Firestore: artifacts/finansialku-app/users/{id_pengguna}/...
-        const txRef = collection(db, 'artifacts', appId, 'users', user.uid, 'transactions');
+        // Membaca transaksi
+        const txRef = collection(db, 'buku_kas', appKey, 'transaksi');
         const unsubTx = onSnapshot(txRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          data.sort((a, b) => new Date(b.date) - new Date(a.date)); // Urutkan tanggal terbaru
+          data.sort((a, b) => new Date(b.date) - new Date(a.date)); 
           setTransactions(data);
         }, (error) => {
-          console.error("Error mengambil transaksi:", error);
-          showToast("Gagal mengambil data dari database");
+          console.error("Error Read:", error);
+          showToast("Gagal baca database! Pastikan RULES (Gembok) sudah dibuka seperti di Tahap 3.", true);
         });
 
-        const debtRef = collection(db, 'artifacts', appId, 'users', user.uid, 'debts');
+        // Membaca hutang
+        const debtRef = collection(db, 'buku_kas', appKey, 'hutang');
         const unsubDebt = onSnapshot(debtRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          data.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)); // Urutkan jatuh tempo terdekat
+          data.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
           setDebts(data);
-        }, (error) => console.error("Error mengambil hutang:", error));
+        }, (error) => console.error(error));
 
-        return () => { 
-          unsubTx(); 
-          unsubDebt(); 
-        };
-      }, [user]);
+        return () => { unsubTx(); unsubDebt(); };
+      }, [appKey]);
 
-      // 3. KALKULASI KEUANGAN
       const { totalIncome, totalExpense, balance } = useMemo(() => {
         let income = 0; let expense = 0;
         transactions.forEach(tx => {
@@ -150,57 +134,61 @@
         return { totalIncome: income, totalExpense: expense, balance: income - expense };
       }, [transactions]);
 
-      const totalDebt = useMemo(() => {
-        return debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.amount, 0);
-      }, [debts]);
+      const totalDebt = useMemo(() => debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.amount, 0), [debts]);
 
-      // 4. FUNGSI SIMPAN & HAPUS KE FIREBASE ANDA
+      // FUNGSI MENYIMPAN TRANSAKSI KE DATABASE (CLOUD)
       const handleAddTx = async (e) => {
         e.preventDefault();
-        if (!txAmount || !txDesc || !user) return;
-        const newDocRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'transactions'));
-        await setDoc(newDocRef, { type: txType, amount: parseFloat(txAmount), description: txDesc, date: txDate });
-        setTxAmount(''); setTxDesc('');
-        showToast('✔️ Transaksi tersimpan di Cloud Anda');
+        if (!txAmount || !txDesc || !appKey || !db) return;
+        
+        try {
+          const newDocRef = doc(collection(db, 'buku_kas', appKey, 'transaksi'));
+          await setDoc(newDocRef, { type: txType, amount: parseFloat(txAmount), description: txDesc, date: txDate });
+          setTxAmount(''); setTxDesc('');
+          showToast('✔️ Data berhasil tersimpan di Cloud!');
+        } catch (error) {
+          console.error(error);
+          showToast('❌ Gagal Simpan! Pastikan RULES (Gembok) sudah dibuka.', true);
+        }
       };
 
       const handleDeleteTx = async (id) => {
-        if (!user) return;
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'transactions', id));
-        showToast('🗑️ Transaksi dihapus');
+        if (!appKey || !db) return;
+        try {
+          await deleteDoc(doc(db, 'buku_kas', appKey, 'transaksi', id));
+          showToast('🗑️ Data dihapus');
+        } catch(e) { showToast('❌ Gagal hapus data', true); }
       };
 
+      // FUNGSI MENYIMPAN HUTANG KE DATABASE (CLOUD)
       const handleAddDebt = async (e) => {
         e.preventDefault();
-        if (!debtAmount || !debtDesc || !debtDueDate || !user) return;
-        const newDocRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'debts'));
-        await setDoc(newDocRef, { amount: parseFloat(debtAmount), description: debtDesc, dueDate: debtDueDate, isPaid: false });
-        setDebtAmount(''); setDebtDesc(''); setDebtDueDate('');
-        showToast('✔️ Hutang tercatat di Cloud Anda');
+        if (!debtAmount || !debtDesc || !debtDueDate || !appKey || !db) return;
+        try {
+          const newDocRef = doc(collection(db, 'buku_kas', appKey, 'hutang'));
+          await setDoc(newDocRef, { amount: parseFloat(debtAmount), description: debtDesc, dueDate: debtDueDate, isPaid: false });
+          setDebtAmount(''); setDebtDesc(''); setDebtDueDate('');
+          showToast('✔️ Hutang berhasil dicatat di Cloud!');
+        } catch(e) { showToast('❌ Gagal simpan hutang.', true); }
       };
 
       const handleToggleDebt = async (debtObj) => {
-        if (!user) return;
-        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'debts', debtObj.id), { ...debtObj, isPaid: !debtObj.isPaid });
+        if (!appKey || !db) return;
+        await setDoc(doc(db, 'buku_kas', appKey, 'hutang', debtObj.id), { ...debtObj, isPaid: !debtObj.isPaid });
       };
 
       const handleDeleteDebt = async (id) => {
-        if (!user) return;
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'debts', id));
-        showToast('🗑️ Hutang dihapus');
+        if (!appKey || !db) return;
+        await deleteDoc(doc(db, 'buku_kas', appKey, 'hutang', id));
       };
 
-      // 5. FUNGSI UNDUH CSV KE HP
       const handleDownloadCSV = () => {
         const filteredTx = transactions.filter(tx => {
           const d = new Date(tx.date);
           return d.getMonth() === parseInt(reportMonth) && d.getFullYear() === parseInt(reportYear);
         });
 
-        if (filteredTx.length === 0) {
-          showToast('⚠️ Tidak ada data untuk diunduh bulan ini');
-          return;
-        }
+        if (filteredTx.length === 0) return showToast('⚠️ Tidak ada data untuk diunduh bulan ini');
 
         const rows = [['Tanggal', 'Tipe', 'Deskripsi', 'Nominal']];
         filteredTx.forEach(tx => rows.push([tx.date, tx.type, `"${tx.description}"`, tx.amount]));
@@ -220,48 +208,60 @@
         const link = document.createElement("a");
         link.href = url;
         link.setAttribute("download", `Laporan_Keuangan_${reportYear}_${parseInt(reportMonth)+1}.csv`);
-        
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
-        
-        showToast('📥 Mengunduh CSV ke perangkat Anda...');
       };
 
-      // TAMPILAN LOADING AWAL
-      if (loadingAuth) {
+      if (!isConfigValid) {
         return (
-          <div className="flex flex-col h-screen items-center justify-center bg-gray-50 text-blue-600">
-            <div className="animate-spin text-4xl mb-4">☁️</div>
-            <p className="font-medium animate-pulse">Menyambungkan ke finansialku-pribadi...</p>
+          <div className="flex h-screen items-center justify-center bg-gray-50 p-6 text-center">
+            <div className="bg-white p-6 rounded-2xl shadow border border-orange-200">
+              <span className="text-4xl block mb-4">⚙️</span>
+              <h2 className="text-xl font-bold text-orange-600 mb-2">Belum Memasukkan Config</h2>
+              <p className="text-gray-600">Buka file kodenya, dan paste Firebase Config Anda di baris ke-43.</p>
+            </div>
           </div>
         );
       }
 
-      // TAMPILAN UTAMA
+      if (!appKey) {
+        return (
+          <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
+            <div className="bg-white p-8 rounded-3xl shadow-lg border border-gray-100 max-w-sm w-full text-center">
+              <span className="text-6xl block mb-6">🔑</span>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Buku KeuanganKu</h2>
+              <p className="text-gray-500 text-sm mb-6">Buat PIN atau masukkan PIN lama Anda untuk membuka catatan uang Anda dari Database.</p>
+              
+              <form onSubmit={handleLogin}>
+                <input type="text" required placeholder="Contoh: uangku123" value={inputKey} onChange={e => setInputKey(e.target.value)} className="w-full p-4 border-2 rounded-xl text-center font-bold text-lg mb-4 focus:border-blue-500 outline-none" />
+                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl">Buka Database</button>
+              </form>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div>
-          {/* Toast Notification */}
           {toast && (
-            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-5 py-2 rounded-full shadow-lg z-50 text-sm font-medium flex items-center space-x-2 toast-enter">
+            <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 px-5 py-3 rounded-xl shadow-lg z-50 text-sm font-bold flex items-center space-x-2 toast-enter ${isError ? 'bg-red-600 text-white' : 'bg-gray-800 text-white'}`}>
               <span>{toast}</span>
             </div>
           )}
 
-          {/* Header */}
           <header className="bg-blue-700 text-white p-4 shadow-md sticky top-0 z-20 flex justify-between items-center">
             <div className="flex items-center space-x-2">
               <span className="text-2xl">👛</span>
-              <h1 className="text-xl font-bold">FinansialKu</h1>
+              <div>
+                <h1 className="text-lg font-bold leading-tight">KeuanganKu</h1>
+                <p className="text-[10px] text-blue-200">Database: AKTIF ({appKey})</p>
+              </div>
             </div>
-            <div className="text-xs bg-blue-800 px-3 py-1 rounded-full flex items-center shadow-inner">
-              <span className="w-2 h-2 rounded-full bg-green-400 mr-2 animate-pulse"></span>
-              {user ? 'Tersambung' : 'Offline'}
-            </div>
+            <button onClick={() => { localStorage.removeItem('kunci_brankas'); setAppKey(''); setTransactions([]); }} className="text-xs bg-blue-800 px-3 py-2 rounded-lg shadow-inner font-bold">Kunci Keluar</button>
           </header>
 
-          {/* Navigasi Bawah */}
           <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-3 pb-safe z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
             {[
               { id: 'ringkasan', icon: '📊', label: 'Ringkasan' },
@@ -269,10 +269,7 @@
               { id: 'hutang', icon: '💳', label: 'Hutang' },
               { id: 'laporan', icon: '📄', label: 'Laporan' },
             ].map(tab => (
-              <button 
-                key={tab.id} onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center justify-center w-full transition-colors ${activeTab === tab.id ? 'text-blue-600' : 'text-gray-400'}`}
-              >
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center w-full transition-colors ${activeTab === tab.id ? 'text-blue-600' : 'text-gray-400'}`}>
                 <span className="text-xl mb-1 filter drop-shadow-sm">{tab.icon}</span>
                 <span className="text-[10px] font-medium">{tab.label}</span>
               </button>
@@ -280,7 +277,6 @@
           </nav>
 
           <main className="p-4">
-            {/* TAB: RINGKASAN */}
             {activeTab === 'ringkasan' && (
               <div className="space-y-4">
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
@@ -288,12 +284,10 @@
                   <p className="text-gray-500 text-sm mb-1 relative z-10">Total Uang Dipegang</p>
                   <p className={`text-3xl font-bold relative z-10 ${balance >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{formatIDR(balance)}</p>
                 </div>
-                
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                   <p className="text-gray-500 text-sm mb-1">⚠️ Total Hutang Aktif</p>
                   <p className="text-3xl font-bold text-orange-600">{formatIDR(totalDebt)}</p>
                 </div>
-
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-green-50 p-4 rounded-xl border border-green-100">
                     <p className="text-green-700 text-xs font-bold mb-1">📈 Pemasukan</p>
@@ -307,7 +301,6 @@
               </div>
             )}
 
-            {/* TAB: TRANSAKSI */}
             {activeTab === 'transaksi' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
@@ -317,19 +310,18 @@
                       <button type="button" onClick={() => setTxType('pengeluaran')} className={`flex-1 py-2 rounded-lg text-sm font-bold border transition-colors ${txType === 'pengeluaran' ? 'bg-red-50 text-red-600 border-red-200 shadow-inner' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>Pengeluaran</button>
                       <button type="button" onClick={() => setTxType('pemasukan')} className={`flex-1 py-2 rounded-lg text-sm font-bold border transition-colors ${txType === 'pemasukan' ? 'bg-green-50 text-green-600 border-green-200 shadow-inner' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>Pemasukan</button>
                     </div>
-                    <input type="number" required placeholder="Nominal (Rp)" value={txAmount} onChange={e=>setTxAmount(e.target.value)} className="w-full p-3 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                    <input type="text" required placeholder="Keterangan (Makan, Gaji...)" value={txDesc} onChange={e=>setTxDesc(e.target.value)} className="w-full p-3 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                    <input type="date" required value={txDate} onChange={e=>setTxDate(e.target.value)} className="w-full p-3 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                    <input type="number" required placeholder="Nominal (Rp)" value={txAmount} onChange={e=>setTxAmount(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
+                    <input type="text" required placeholder="Keterangan (Makan, Gaji...)" value={txDesc} onChange={e=>setTxDesc(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
+                    <input type="date" required value={txDate} onChange={e=>setTxDate(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
                     <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors">Simpan Transaksi</button>
                   </form>
                 </div>
-
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                   <h2 className="font-bold p-4 border-b bg-gray-50 text-sm">Riwayat Transaksi</h2>
                   <div className="divide-y">
                     {transactions.length === 0 && <p className="p-6 text-center text-gray-400 text-sm">Belum ada transaksi</p>}
                     {transactions.map(tx => (
-                      <div key={tx.id} className="p-4 flex justify-between items-center bg-white hover:bg-gray-50">
+                      <div key={tx.id} className="p-4 flex justify-between items-center bg-white">
                         <div className="flex items-center space-x-3 overflow-hidden">
                           <span className="text-2xl">{tx.type === 'pemasukan' ? '📈' : '📉'}</span>
                           <div className="truncate">
@@ -338,9 +330,7 @@
                           </div>
                         </div>
                         <div className="flex items-center space-x-2 pl-2">
-                          <span className={`font-bold text-sm whitespace-nowrap ${tx.type === 'pemasukan' ? 'text-green-600' : 'text-red-600'}`}>
-                            {tx.type === 'pemasukan' ? '+' : '-'}{formatIDR(tx.amount)}
-                          </span>
+                          <span className={`font-bold text-sm whitespace-nowrap ${tx.type === 'pemasukan' ? 'text-green-600' : 'text-red-600'}`}>{tx.type === 'pemasukan' ? '+' : '-'}{formatIDR(tx.amount)}</span>
                           <button onClick={() => handleDeleteTx(tx.id)} className="text-xl p-1 bg-gray-50 hover:bg-red-50 rounded-lg">🗑️</button>
                         </div>
                       </div>
@@ -350,20 +340,18 @@
               </div>
             )}
 
-            {/* TAB: HUTANG */}
             {activeTab === 'hutang' && (
               <div className="space-y-6">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
                   <h2 className="font-bold mb-3 flex items-center">➕ Catat Hutang</h2>
                   <form onSubmit={handleAddDebt} className="space-y-3">
-                    <input type="number" required placeholder="Nominal Hutang (Rp)" value={debtAmount} onChange={e=>setDebtAmount(e.target.value)} className="w-full p-3 border rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none" />
-                    <input type="text" required placeholder="Ke siapa / Keterangan" value={debtDesc} onChange={e=>setDebtDesc(e.target.value)} className="w-full p-3 border rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none" />
+                    <input type="number" required placeholder="Nominal Hutang (Rp)" value={debtAmount} onChange={e=>setDebtAmount(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
+                    <input type="text" required placeholder="Ke siapa / Keterangan" value={debtDesc} onChange={e=>setDebtDesc(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
                     <label className="block text-xs text-gray-500">Jatuh Tempo:</label>
-                    <input type="date" required value={debtDueDate} onChange={e=>setDebtDueDate(e.target.value)} className="w-full p-3 border rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none" />
+                    <input type="date" required value={debtDueDate} onChange={e=>setDebtDueDate(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
                     <button type="submit" className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-xl transition-colors">Simpan Hutang</button>
                   </form>
                 </div>
-
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                   <h2 className="font-bold p-4 border-b bg-gray-50 text-sm">Daftar Hutang</h2>
                   <div className="divide-y">
@@ -371,20 +359,14 @@
                     {debts.map(debt => (
                       <div key={debt.id} className={`p-4 flex justify-between items-center ${debt.isPaid ? 'opacity-60 bg-gray-50' : 'bg-white'}`}>
                         <div className="flex items-center space-x-3 overflow-hidden">
-                          <button onClick={() => handleToggleDebt(debt)} className="text-2xl min-w-[32px] transition-transform active:scale-90">
-                            {debt.isPaid ? '✅' : '⭕'}
-                          </button>
+                          <button onClick={() => handleToggleDebt(debt)} className="text-2xl min-w-[32px]">{debt.isPaid ? '✅' : '⭕'}</button>
                           <div className="truncate">
                             <p className={`font-semibold text-sm truncate ${debt.isPaid ? 'line-through text-gray-500' : ''}`}>{debt.description}</p>
-                            <p className={`text-xs ${!debt.isPaid && new Date(debt.dueDate) < new Date() ? 'text-red-500 font-bold' : 'text-gray-400'}`}>
-                              Tempo: {formatDate(debt.dueDate)}
-                            </p>
+                            <p className={`text-xs ${!debt.isPaid && new Date(debt.dueDate) < new Date() ? 'text-red-500 font-bold' : 'text-gray-400'}`}>Tempo: {formatDate(debt.dueDate)}</p>
                           </div>
                         </div>
                         <div className="flex items-center space-x-2 pl-2">
-                          <span className={`font-bold text-sm whitespace-nowrap ${debt.isPaid ? 'text-gray-500' : 'text-orange-600'}`}>
-                            {formatIDR(debt.amount)}
-                          </span>
+                          <span className={`font-bold text-sm whitespace-nowrap ${debt.isPaid ? 'text-gray-500' : 'text-orange-600'}`}>{formatIDR(debt.amount)}</span>
                           <button onClick={() => handleDeleteDebt(debt.id)} className="text-xl p-1 bg-gray-50 hover:bg-red-50 rounded-lg">🗑️</button>
                         </div>
                       </div>
@@ -394,26 +376,21 @@
               </div>
             )}
 
-            {/* TAB: LAPORAN */}
             {activeTab === 'laporan' && (
               <div className="space-y-4">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center">
                   <span className="text-5xl block mb-3">📥</span>
                   <h2 className="text-xl font-bold mb-2">Unduh Laporan</h2>
-                  <p className="text-sm text-gray-500 mb-5">Laporan bulanan akan diunduh secara langsung ke penyimpanan HP Anda.</p>
-                  
+                  <p className="text-sm text-gray-500 mb-5">Laporan akan diunduh ke HP Anda sebagai file CSV (Excel).</p>
                   <div className="flex space-x-2 mb-4">
-                    <select value={reportMonth} onChange={e=>setReportMonth(e.target.value)} className="w-1/2 p-3 border rounded-xl text-sm bg-gray-50 outline-none focus:ring-2 focus:ring-blue-500">
+                    <select value={reportMonth} onChange={e=>setReportMonth(e.target.value)} className="w-1/2 p-3 border rounded-xl text-sm bg-gray-50 outline-none">
                       {['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'].map((m,i) => <option key={i} value={i}>{m}</option>)}
                     </select>
-                    <select value={reportYear} onChange={e=>setReportYear(e.target.value)} className="w-1/2 p-3 border rounded-xl text-sm bg-gray-50 outline-none focus:ring-2 focus:ring-blue-500">
+                    <select value={reportYear} onChange={e=>setReportYear(e.target.value)} className="w-1/2 p-3 border rounded-xl text-sm bg-gray-50 outline-none">
                       {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
                     </select>
                   </div>
-
-                  <button onClick={handleDownloadCSV} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors">
-                    Unduh CSV
-                  </button>
+                  <button onClick={handleDownloadCSV} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors">Unduh Laporan Excel</button>
                 </div>
               </div>
             )}
