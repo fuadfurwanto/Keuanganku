@@ -49,7 +49,7 @@
   messagingSenderId: "407503439085",
   appId: "1:407503439085:web:d98a90683fb3a425a978e4"
 };
-    // Pengecekan agar user tidak lupa mengganti config
+
     const isConfigValid = firebaseConfig.apiKey !== "PASTE_API_KEY_ANDA_DISINI";
     
     let app, db;
@@ -62,7 +62,6 @@
     const formatDate = (dateString) => new Date(dateString).toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' });
 
     function App() {
-      // Menyimpan PIN di HP agar tidak perlu ketik terus menerus
       const [appKey, setAppKey] = useState(localStorage.getItem('kunci_brankas') || '');
       const [inputKey, setInputKey] = useState('');
       
@@ -99,11 +98,9 @@
         setAppKey(key); 
       };
 
-      // FUNGSI MEMBACA DATA DARI DATABASE (CLOUD)
       useEffect(() => {
         if (!appKey || !db) return;
 
-        // Membaca transaksi
         const txRef = collection(db, 'buku_kas', appKey, 'transaksi');
         const unsubTx = onSnapshot(txRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -111,10 +108,9 @@
           setTransactions(data);
         }, (error) => {
           console.error("Error Read:", error);
-          showToast("Gagal baca database! Pastikan RULES (Gembok) sudah dibuka seperti di Tahap 3.", true);
+          showToast("Gagal baca database! Pastikan RULES (Gembok) sudah dibuka.", true);
         });
 
-        // Membaca hutang
         const debtRef = collection(db, 'buku_kas', appKey, 'hutang');
         const unsubDebt = onSnapshot(debtRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -125,18 +121,41 @@
         return () => { unsubTx(); unsubDebt(); };
       }, [appKey]);
 
-      const { totalIncome, totalExpense, balance } = useMemo(() => {
-        let income = 0; let expense = 0;
+      // --- PERUBAHAN DI SINI: MENGHITUNG PENGELUARAN HARI INI ---
+      const { totalIncome, totalExpense, expenseToday, balance } = useMemo(() => {
+        let income = 0; 
+        let expense = 0;
+        let expToday = 0;
+        
+        // Mendapatkan format tanggal hari ini (YYYY-MM-DD) sesuai zona waktu HP
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        const todayFormatted = `${yyyy}-${mm}-${dd}`;
+
         transactions.forEach(tx => {
-          if (tx.type === 'pemasukan') income += tx.amount;
-          else expense += tx.amount;
+          if (tx.type === 'pemasukan') {
+            income += tx.amount;
+          } else {
+            expense += tx.amount;
+            // Jika tanggal transaksinya adalah hari ini, masukkan ke hitungan hari ini
+            if (tx.date === todayFormatted) {
+              expToday += tx.amount;
+            }
+          }
         });
-        return { totalIncome: income, totalExpense: expense, balance: income - expense };
+        
+        return { 
+          totalIncome: income, 
+          totalExpense: expense, 
+          expenseToday: expToday, // Variabel baru untuk pengeluaran hari ini
+          balance: income - expense 
+        };
       }, [transactions]);
 
       const totalDebt = useMemo(() => debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.amount, 0), [debts]);
 
-      // FUNGSI MENYIMPAN TRANSAKSI KE DATABASE (CLOUD)
       const handleAddTx = async (e) => {
         e.preventDefault();
         if (!txAmount || !txDesc || !appKey || !db) return;
@@ -160,7 +179,6 @@
         } catch(e) { showToast('❌ Gagal hapus data', true); }
       };
 
-      // FUNGSI MENYIMPAN HUTANG KE DATABASE (CLOUD)
       const handleAddDebt = async (e) => {
         e.preventDefault();
         if (!debtAmount || !debtDesc || !debtDueDate || !appKey || !db) return;
@@ -284,18 +302,29 @@
                   <p className="text-gray-500 text-sm mb-1 relative z-10">Total Uang Dipegang</p>
                   <p className={`text-3xl font-bold relative z-10 ${balance >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{formatIDR(balance)}</p>
                 </div>
+                
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                   <p className="text-gray-500 text-sm mb-1">⚠️ Total Hutang Aktif</p>
                   <p className="text-3xl font-bold text-orange-600">{formatIDR(totalDebt)}</p>
                 </div>
+
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-green-50 p-4 rounded-xl border border-green-100">
-                    <p className="text-green-700 text-xs font-bold mb-1">📈 Pemasukan</p>
-                    <p className="text-lg font-bold text-green-800">{formatIDR(totalIncome)}</p>
+                  <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex flex-col justify-between">
+                    <div>
+                      <p className="text-green-700 text-xs font-bold mb-1">📈 Pemasukan Total</p>
+                      <p className="text-lg font-bold text-green-800">{formatIDR(totalIncome)}</p>
+                    </div>
                   </div>
-                  <div className="bg-red-50 p-4 rounded-xl border border-red-100">
-                    <p className="text-red-700 text-xs font-bold mb-1">📉 Pengeluaran</p>
-                    <p className="text-lg font-bold text-red-800">{formatIDR(totalExpense)}</p>
+                  
+                  {/* --- KOTAK PENGELUARAN YANG DIPERBARUI --- */}
+                  <div className="bg-red-50 p-4 rounded-xl border border-red-100 flex flex-col justify-between relative">
+                    <div>
+                      <p className="text-red-700 text-xs font-bold mb-1">📉 Pengeluaran (Hari Ini)</p>
+                      <p className="text-xl font-bold text-red-800">{formatIDR(expenseToday)}</p>
+                    </div>
+                    <div className="mt-3 pt-2 border-t border-red-200">
+                      <p className="text-[10px] text-red-600 font-medium">Total Semua: {formatIDR(totalExpense)}</p>
+                    </div>
                   </div>
                 </div>
               </div>
