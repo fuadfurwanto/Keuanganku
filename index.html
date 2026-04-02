@@ -121,13 +121,11 @@
         return () => { unsubTx(); unsubDebt(); };
       }, [appKey]);
 
-      // --- PERUBAHAN DI SINI: MENGHITUNG PENGELUARAN HARI INI ---
       const { totalIncome, totalExpense, expenseToday, balance } = useMemo(() => {
         let income = 0; 
         let expense = 0;
         let expToday = 0;
         
-        // Mendapatkan format tanggal hari ini (YYYY-MM-DD) sesuai zona waktu HP
         const today = new Date();
         const yyyy = today.getFullYear();
         const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -139,7 +137,6 @@
             income += tx.amount;
           } else {
             expense += tx.amount;
-            // Jika tanggal transaksinya adalah hari ini, masukkan ke hitungan hari ini
             if (tx.date === todayFormatted) {
               expToday += tx.amount;
             }
@@ -149,7 +146,7 @@
         return { 
           totalIncome: income, 
           totalExpense: expense, 
-          expenseToday: expToday, // Variabel baru untuk pengeluaran hari ini
+          expenseToday: expToday,
           balance: income - expense 
         };
       }, [transactions]);
@@ -200,24 +197,56 @@
         await deleteDoc(doc(db, 'buku_kas', appKey, 'hutang', id));
       };
 
+      // --- PERUBAHAN DI SINI: MENGHITUNG SALDO BULAN SEBELUMNYA ---
       const handleDownloadCSV = () => {
-        const filteredTx = transactions.filter(tx => {
+        const targetMonth = parseInt(reportMonth);
+        const targetYear = parseInt(reportYear);
+
+        let saldoBulanLalu = 0;
+        let monthIncome = 0;
+        let monthExpense = 0;
+        const currentTx = [];
+
+        // Memilah transaksi: Mana yang masa lalu, mana yang bulan ini
+        transactions.forEach(tx => {
           const d = new Date(tx.date);
-          return d.getMonth() === parseInt(reportMonth) && d.getFullYear() === parseInt(reportYear);
+          const txMonth = d.getMonth();
+          const txYear = d.getFullYear();
+
+          // Jika transaksi terjadi SEBELUM bulan yang dipilih
+          if (txYear < targetYear || (txYear === targetYear && txMonth < targetMonth)) {
+            if (tx.type === 'pemasukan') saldoBulanLalu += tx.amount;
+            else saldoBulanLalu -= tx.amount;
+          } 
+          // Jika transaksi terjadi PADA bulan yang dipilih
+          else if (txYear === targetYear && txMonth === targetMonth) {
+            currentTx.push(tx);
+            if (tx.type === 'pemasukan') monthIncome += tx.amount;
+            else monthExpense += tx.amount;
+          }
         });
 
-        if (filteredTx.length === 0) return showToast('⚠️ Tidak ada data untuk diunduh bulan ini');
+        if (currentTx.length === 0 && saldoBulanLalu === 0) {
+          return showToast('⚠️ Tidak ada data untuk diunduh bulan ini');
+        }
 
         const rows = [['Tanggal', 'Tipe', 'Deskripsi', 'Nominal']];
-        filteredTx.forEach(tx => rows.push([tx.date, tx.type, `"${tx.description}"`, tx.amount]));
         
-        const mIncome = filteredTx.filter(t => t.type === 'pemasukan').reduce((s, t) => s + t.amount, 0);
-        const mExpense = filteredTx.filter(t => t.type === 'pengeluaran').reduce((s, t) => s + t.amount, 0);
+        // 1. Menambahkan baris Saldo Awal (Dari sisa uang bulan-bulan sebelumnya)
+        rows.push(['-', 'SALDO AWAL', '"SISA UANG DARI BULAN SEBELUMNYA"', saldoBulanLalu]);
+        rows.push(['', '', '', '']); // Baris kosong pembatas
+
+        // 2. Menambahkan daftar transaksi bulan ini
+        currentTx.forEach(tx => rows.push([tx.date, tx.type, `"${tx.description}"`, tx.amount]));
         
+        // 3. Menambahkan kalkulasi akhir
         rows.push(['', '', '', '']);
-        rows.push(['', '', 'Total Pemasukan', mIncome]);
-        rows.push(['', '', 'Total Pengeluaran', mExpense]);
-        rows.push(['', '', 'Sisa/Selisih', mIncome - mExpense]);
+        rows.push(['', '', 'Total Pemasukan Bulan Ini', monthIncome]);
+        rows.push(['', '', 'Total Pengeluaran Bulan Ini', monthExpense]);
+        
+        // Total Uang Sekarang = Saldo Bulan Lalu + (Pemasukan Bulan Ini - Pengeluaran Bulan Ini)
+        const saldoAkhir = saldoBulanLalu + monthIncome - monthExpense;
+        rows.push(['', '', 'TOTAL UANG SEKARANG (SISA)', saldoAkhir]);
 
         const csvContent = rows.map(e => e.join(",")).join("\n");
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -225,7 +254,7 @@
         
         const link = document.createElement("a");
         link.href = url;
-        link.setAttribute("download", `Laporan_Keuangan_${reportYear}_${parseInt(reportMonth)+1}.csv`);
+        link.setAttribute("download", `Laporan_Keuangan_${reportYear}_${targetMonth + 1}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -316,7 +345,6 @@
                     </div>
                   </div>
                   
-                  {/* --- KOTAK PENGELUARAN YANG DIPERBARUI --- */}
                   <div className="bg-red-50 p-4 rounded-xl border border-red-100 flex flex-col justify-between relative">
                     <div>
                       <p className="text-red-700 text-xs font-bold mb-1">📉 Pengeluaran (Hari Ini)</p>
