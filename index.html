@@ -38,17 +38,16 @@
     import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
     // =========================================================
-    // 🔴 PASTE FIREBASE CONFIG ANDA DI SINI 🔴
-    // Ganti seluruh isi const firebaseConfig ini dengan milik Anda
+    // 🔴 FIREBASE CONFIG 🔴
     // =========================================================
     const firebaseConfig = {
-  apiKey: "AIzaSyCXRkPDNVsitBWtBufowhG4ET7t58uvzuA",
-  authDomain: "keuanganpribadiku-708ec.firebaseapp.com",
-  projectId: "keuanganpribadiku-708ec",
-  storageBucket: "keuanganpribadiku-708ec.firebasestorage.app",
-  messagingSenderId: "407503439085",
-  appId: "1:407503439085:web:d98a90683fb3a425a978e4"
-};
+      apiKey: "AIzaSyCXRkPDNVsitBWtBufowhG4ET7t58uvzuA",
+      authDomain: "keuanganpribadiku-708ec.firebaseapp.com",
+      projectId: "keuanganpribadiku-708ec",
+      storageBucket: "keuanganpribadiku-708ec.firebasestorage.app",
+      messagingSenderId: "407503439085",
+      appId: "1:407503439085:web:d98a90683fb3a425a978e4"
+    };
 
     const isConfigValid = firebaseConfig.apiKey !== "PASTE_API_KEY_ANDA_DISINI";
     
@@ -71,16 +70,30 @@
       const [activeTab, setActiveTab] = useState('ringkasan');
       const [transactions, setTransactions] = useState([]);
       const [debts, setDebts] = useState([]);
+      const [plans, setPlans] = useState([]);
 
+      // Fitur Gaji Auto Tanggal 28
+      const [salary, setSalary] = useState(0);
+      const [isEditingSalary, setIsEditingSalary] = useState(false);
+      const [salaryInput, setSalaryInput] = useState('');
+
+      // Form Transaksi
       const [txType, setTxType] = useState('pengeluaran');
       const [txAmount, setTxAmount] = useState('');
       const [txDesc, setTxDesc] = useState('');
       const [txDate, setTxDate] = useState(new Date().toISOString().split('T')[0]);
 
+      // Form Hutang
       const [debtAmount, setDebtAmount] = useState('');
       const [debtDesc, setDebtDesc] = useState('');
       const [debtDueDate, setDebtDueDate] = useState('');
 
+      // Form Rencana Pengeluaran
+      const [planDesc, setPlanDesc] = useState('');
+      const [planAmount, setPlanAmount] = useState('');
+      const [planTargetDate, setPlanTargetDate] = useState('');
+
+      // Laporan
       const [reportMonth, setReportMonth] = useState(new Date().getMonth());
       const [reportYear, setReportYear] = useState(new Date().getFullYear());
 
@@ -98,9 +111,11 @@
         setAppKey(key); 
       };
 
+      // Listener Firebase Firestore Realtime
       useEffect(() => {
         if (!appKey || !db) return;
 
+        // 1. Realtime Transaksi
         const txRef = collection(db, 'buku_kas', appKey, 'transaksi');
         const unsubTx = onSnapshot(txRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -111,6 +126,7 @@
           showToast("Gagal baca database! Pastikan RULES (Gembok) sudah dibuka.", true);
         });
 
+        // 2. Realtime Hutang
         const debtRef = collection(db, 'buku_kas', appKey, 'hutang');
         const unsubDebt = onSnapshot(debtRef, (snapshot) => {
           const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -118,8 +134,67 @@
           setDebts(data);
         }, (error) => console.error(error));
 
-        return () => { unsubTx(); unsubDebt(); };
+        // 3. Realtime Rencana Pengeluaran
+        const planRef = collection(db, 'buku_kas', appKey, 'rencana');
+        const unsubPlan = onSnapshot(planRef, (snapshot) => {
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          data.sort((a, b) => new Date(a.targetDate) - new Date(b.targetDate));
+          setPlans(data);
+        }, (error) => console.error(error));
+
+        // 4. Realtime Pengaturan Gaji
+        const salaryRef = doc(db, 'buku_kas', appKey, 'pengaturan', 'gaji');
+        const unsubSalary = onSnapshot(salaryRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const val = docSnap.data().amount || 0;
+            setSalary(val);
+            setSalaryInput(val.toString());
+          }
+        }, (error) => console.error(error));
+
+        return () => { unsubTx(); unsubDebt(); unsubPlan(); unsubSalary(); };
       }, [appKey]);
+
+      // Auto check gaji pada tanggal 28 atau setelahnya
+      useEffect(() => {
+        if (!appKey || !db || salary <= 0 || transactions.length === 0) return;
+
+        const today = new Date();
+        const currentDay = today.getDate();
+        const currentYear = today.getFullYear();
+        const currentMonthStr = String(today.getMonth() + 1).padStart(2, '0');
+        const currentMonthKey = `${currentYear}-${currentMonthStr}`;
+
+        // Jika sudah tanggal 28 ke atas
+        if (currentDay >= 28) {
+          const salaryTxDate = `${currentMonthKey}-28`;
+
+          // Cek apakah gaji bulan ini sudah pernah masuk
+          const isAlreadyAdded = transactions.some(tx => 
+            tx.type === 'pemasukan' && 
+            tx.description.includes('Gaji Bulanan (Otomatis)') &&
+            tx.date.startsWith(currentMonthKey)
+          );
+
+          if (!isAlreadyAdded) {
+            const autoAddSalary = async () => {
+              try {
+                const newDocRef = doc(collection(db, 'buku_kas', appKey, 'transaksi'));
+                await setDoc(newDocRef, {
+                  type: 'pemasukan',
+                  amount: parseFloat(salary),
+                  description: 'Gaji Bulanan (Otomatis Tanggal 28)',
+                  date: salaryTxDate
+                });
+                showToast(`🎉 Gaji bulanan ${formatIDR(salary)} otomatis ditambahkan!`);
+              } catch (e) {
+                console.error("Auto Salary Error:", e);
+              }
+            };
+            autoAddSalary();
+          }
+        }
+      }, [appKey, db, salary, transactions]);
 
       const { totalIncome, totalExpense, expenseToday, balance } = useMemo(() => {
         let income = 0; 
@@ -152,6 +227,24 @@
       }, [transactions]);
 
       const totalDebt = useMemo(() => debts.filter(d => !d.isPaid).reduce((sum, d) => sum + d.amount, 0), [debts]);
+      const totalPlanned = useMemo(() => plans.reduce((sum, p) => sum + p.amount, 0), [plans]);
+      const estimatedRemainingBalance = balance - totalPlanned;
+
+      // Handle Simpan Setting Gaji
+      const handleSaveSalary = async (e) => {
+        e.preventDefault();
+        if (!salaryInput || !appKey || !db) return;
+        try {
+          await setDoc(doc(db, 'buku_kas', appKey, 'pengaturan', 'gaji'), {
+            amount: parseFloat(salaryInput),
+            updatedAt: new Date().toISOString()
+          });
+          setIsEditingSalary(false);
+          showToast('✔️ Setting gaji berhasil diperbarui!');
+        } catch(e) {
+          showToast('❌ Gagal simpan nominal gaji', true);
+        }
+      };
 
       const handleAddTx = async (e) => {
         e.preventDefault();
@@ -197,7 +290,45 @@
         await deleteDoc(doc(db, 'buku_kas', appKey, 'hutang', id));
       };
 
-      // --- PERUBAHAN DI SINI: MENGHITUNG SALDO BULAN SEBELUMNYA ---
+      // Handle Rencana Pengeluaran
+      const handleAddPlan = async (e) => {
+        e.preventDefault();
+        if (!planAmount || !planDesc || !appKey || !db) return;
+        try {
+          const newDocRef = doc(collection(db, 'buku_kas', appKey, 'rencana'));
+          await setDoc(newDocRef, { 
+            description: planDesc, 
+            amount: parseFloat(planAmount), 
+            targetDate: planTargetDate || new Date().toISOString().split('T')[0] 
+          });
+          setPlanDesc(''); setPlanAmount(''); setPlanTargetDate('');
+          showToast('🎯 Rencana pengeluaran berhasil dicatat!');
+        } catch(e) { showToast('❌ Gagal simpan rencana.', true); }
+      };
+
+      const handleDeletePlan = async (id) => {
+        if (!appKey || !db) return;
+        await deleteDoc(doc(db, 'buku_kas', appKey, 'rencana', id));
+        showToast('🗑️ Rencana dihapus');
+      };
+
+      const handleRealizePlan = async (plan) => {
+        if (!appKey || !db) return;
+        try {
+          // 1. Tambah ke transaksi pengeluaran
+          const newDocRef = doc(collection(db, 'buku_kas', appKey, 'transaksi'));
+          await setDoc(newDocRef, {
+            type: 'pengeluaran',
+            amount: plan.amount,
+            description: `[Rencana] ${plan.description}`,
+            date: new Date().toISOString().split('T')[0]
+          });
+          // 2. Hapus dari rencana
+          await deleteDoc(doc(db, 'buku_kas', appKey, 'rencana', plan.id));
+          showToast('✅ Rencana direalisasikan menjadi pengeluaran!');
+        } catch(e) { showToast('❌ Gagal merealisasikan rencana', true); }
+      };
+
       const handleDownloadCSV = () => {
         const targetMonth = parseInt(reportMonth);
         const targetYear = parseInt(reportYear);
@@ -207,18 +338,15 @@
         let monthExpense = 0;
         const currentTx = [];
 
-        // Memilah transaksi: Mana yang masa lalu, mana yang bulan ini
         transactions.forEach(tx => {
           const d = new Date(tx.date);
           const txMonth = d.getMonth();
           const txYear = d.getFullYear();
 
-          // Jika transaksi terjadi SEBELUM bulan yang dipilih
           if (txYear < targetYear || (txYear === targetYear && txMonth < targetMonth)) {
             if (tx.type === 'pemasukan') saldoBulanLalu += tx.amount;
             else saldoBulanLalu -= tx.amount;
           } 
-          // Jika transaksi terjadi PADA bulan yang dipilih
           else if (txYear === targetYear && txMonth === targetMonth) {
             currentTx.push(tx);
             if (tx.type === 'pemasukan') monthIncome += tx.amount;
@@ -231,20 +359,15 @@
         }
 
         const rows = [['Tanggal', 'Tipe', 'Deskripsi', 'Nominal']];
-        
-        // 1. Menambahkan baris Saldo Awal (Dari sisa uang bulan-bulan sebelumnya)
         rows.push(['-', 'SALDO AWAL', '"SISA UANG DARI BULAN SEBELUMNYA"', saldoBulanLalu]);
-        rows.push(['', '', '', '']); // Baris kosong pembatas
+        rows.push(['', '', '', '']);
 
-        // 2. Menambahkan daftar transaksi bulan ini
         currentTx.forEach(tx => rows.push([tx.date, tx.type, `"${tx.description}"`, tx.amount]));
         
-        // 3. Menambahkan kalkulasi akhir
         rows.push(['', '', '', '']);
         rows.push(['', '', 'Total Pemasukan Bulan Ini', monthIncome]);
         rows.push(['', '', 'Total Pengeluaran Bulan Ini', monthExpense]);
         
-        // Total Uang Sekarang = Saldo Bulan Lalu + (Pemasukan Bulan Ini - Pengeluaran Bulan Ini)
         const saldoAkhir = saldoBulanLalu + monthIncome - monthExpense;
         rows.push(['', '', 'TOTAL UANG SEKARANG (SISA)', saldoAkhir]);
 
@@ -267,7 +390,7 @@
             <div className="bg-white p-6 rounded-2xl shadow border border-orange-200">
               <span className="text-4xl block mb-4">⚙️</span>
               <h2 className="text-xl font-bold text-orange-600 mb-2">Belum Memasukkan Config</h2>
-              <p className="text-gray-600">Buka file kodenya, dan paste Firebase Config Anda di baris ke-43.</p>
+              <p className="text-gray-600">Buka file kodenya, dan paste Firebase Config Anda di baris ke-30.</p>
             </div>
           </div>
         );
@@ -309,16 +432,17 @@
             <button onClick={() => { localStorage.removeItem('kunci_brankas'); setAppKey(''); setTransactions([]); }} className="text-xs bg-blue-800 px-3 py-2 rounded-lg shadow-inner font-bold">Kunci Keluar</button>
           </header>
 
-          <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-3 pb-safe z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+          <nav className="fixed bottom-0 w-full bg-white border-t flex justify-around p-2 pb-safe z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
             {[
               { id: 'ringkasan', icon: '📊', label: 'Ringkasan' },
               { id: 'transaksi', icon: '💸', label: 'Transaksi' },
+              { id: 'rencana', icon: '🎯', label: 'Rencana' },
               { id: 'hutang', icon: '💳', label: 'Hutang' },
               { id: 'laporan', icon: '📄', label: 'Laporan' },
             ].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center w-full transition-colors ${activeTab === tab.id ? 'text-blue-600' : 'text-gray-400'}`}>
-                <span className="text-xl mb-1 filter drop-shadow-sm">{tab.icon}</span>
-                <span className="text-[10px] font-medium">{tab.label}</span>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center w-full transition-colors py-1 ${activeTab === tab.id ? 'text-blue-600' : 'text-gray-400'}`}>
+                <span className="text-lg mb-0.5 filter drop-shadow-sm">{tab.icon}</span>
+                <span className="text-[9px] font-medium">{tab.label}</span>
               </button>
             ))}
           </nav>
@@ -330,6 +454,27 @@
                   <div className="absolute top-0 right-0 p-4 opacity-10 text-6xl">💰</div>
                   <p className="text-gray-500 text-sm mb-1 relative z-10">Total Uang Dipegang</p>
                   <p className={`text-3xl font-bold relative z-10 ${balance >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{formatIDR(balance)}</p>
+                </div>
+
+                {/* Card Setting Gaji Bulanan (Auto Tanggal 28) */}
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                  <div className="flex justify-between items-center mb-2">
+                    <div>
+                      <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">💼 Gaji Bulanan (Auto Tgl 28)</p>
+                      <p className="text-xl font-bold text-gray-800">{formatIDR(salary)}</p>
+                    </div>
+                    <button onClick={() => setIsEditingSalary(!isEditingSalary)} className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg font-bold border border-blue-100">
+                      {isEditingSalary ? 'Batal' : 'Ubah Gaji'}
+                    </button>
+                  </div>
+                  {isEditingSalary ? (
+                    <form onSubmit={handleSaveSalary} className="mt-3 flex space-x-2">
+                      <input type="number" required placeholder="Nominal Gaji Baru" value={salaryInput} onChange={e => setSalaryInput(e.target.value)} className="w-full p-2.5 border rounded-xl text-sm outline-none" />
+                      <button type="submit" className="bg-blue-600 text-white px-4 rounded-xl font-bold text-sm">Simpan</button>
+                    </form>
+                  ) : (
+                    <p className="text-[11px] text-gray-400 mt-1">Sistem akan otomatis menambah saldo pada tanggal 28 setiap bulan jika belum dicatat.</p>
+                  )}
                 </div>
                 
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
@@ -389,6 +534,69 @@
                         <div className="flex items-center space-x-2 pl-2">
                           <span className={`font-bold text-sm whitespace-nowrap ${tx.type === 'pemasukan' ? 'text-green-600' : 'text-red-600'}`}>{tx.type === 'pemasukan' ? '+' : '-'}{formatIDR(tx.amount)}</span>
                           <button onClick={() => handleDeleteTx(tx.id)} className="text-xl p-1 bg-gray-50 hover:bg-red-50 rounded-lg">🗑️</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB RENCANA PENGELUARAN (BUDGET PLANNING) */}
+            {activeTab === 'rencana' && (
+              <div className="space-y-6">
+                {/* Analisis Pertimbangan */}
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+                  <h2 className="font-bold text-gray-800 text-sm flex items-center">🤔 Pertimbangan Keuangan</h2>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-gray-50 p-3 rounded-xl">
+                      <p className="text-gray-400 mb-0.5">Total Rencana</p>
+                      <p className="font-bold text-purple-700 text-sm">{formatIDR(totalPlanned)}</p>
+                    </div>
+                    <div className={`p-3 rounded-xl ${estimatedRemainingBalance >= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>
+                      <p className="text-gray-500 mb-0.5">Estimasi Sisa Saldo</p>
+                      <p className="font-bold text-sm">{formatIDR(estimatedRemainingBalance)}</p>
+                    </div>
+                  </div>
+                  {estimatedRemainingBalance < 0 ? (
+                    <p className="text-[11px] text-red-600 font-medium">⚠️ Rencana Anda melebihi saldo saat ini. Pertimbangkan untuk menunda beberapa barang.</p>
+                  ) : (
+                    <p className="text-[11px] text-emerald-600 font-medium">✅ Saldo mencukupi untuk memenuhi semua rencana pengeluaran ini.</p>
+                  )}
+                </div>
+
+                {/* Form Tambah Rencana */}
+                <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                  <h2 className="font-bold mb-3 flex items-center text-sm">🎯 Catat Rencana Belanja / Pengeluaran</h2>
+                  <form onSubmit={handleAddPlan} className="space-y-3">
+                    <input type="text" required placeholder="Rencana (Beli HP, Service Motor...)" value={planDesc} onChange={e=>setPlanDesc(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
+                    <input type="number" required placeholder="Estimasi Biaya (Rp)" value={planAmount} onChange={e=>setPlanAmount(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
+                    <label className="block text-xs text-gray-500">Target Tanggal Belanja:</label>
+                    <input type="date" required value={planTargetDate} onChange={e=>setPlanTargetDate(e.target.value)} className="w-full p-3 border rounded-xl text-sm outline-none" />
+                    <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition-colors">Simpan Rencana</button>
+                  </form>
+                </div>
+
+                {/* Daftar Rencana */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                  <h2 className="font-bold p-4 border-b bg-gray-50 text-sm">Daftar Rencana Kedepannya</h2>
+                  <div className="divide-y">
+                    {plans.length === 0 && <p className="p-6 text-center text-gray-400 text-sm">Belum ada rencana pengeluaran</p>}
+                    {plans.map(plan => (
+                      <div key={plan.id} className="p-4 flex justify-between items-center bg-white">
+                        <div className="flex items-center space-x-3 overflow-hidden">
+                          <span className="text-2xl">🛍️</span>
+                          <div className="truncate">
+                            <p className="font-semibold text-sm truncate">{plan.description}</p>
+                            <p className="text-xs text-purple-600">Target: {formatDate(plan.targetDate)}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2 pl-2">
+                          <span className="font-bold text-sm whitespace-nowrap text-purple-700">{formatIDR(plan.amount)}</span>
+                          <button onClick={() => handleRealizePlan(plan)} title="Beli sekarang (Ubah ke Transaksi)" className="text-xs bg-emerald-50 text-emerald-600 hover:bg-emerald-100 p-2 rounded-lg font-bold border border-emerald-200">
+                            Beli ✅
+                          </button>
+                          <button onClick={() => handleDeletePlan(plan.id)} className="text-xl p-1 bg-gray-50 hover:bg-red-50 rounded-lg">🗑️</button>
                         </div>
                       </div>
                     ))}
